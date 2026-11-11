@@ -1,0 +1,116 @@
+name: BoileKho Android Build Automation
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Package BoileKho
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Run Unit Tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
+
+      - name: Build Debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Prepare BoileKho Debug APK
+        run: |
+          mkdir -p artifacts/debug
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/debug/BoileKho.apk
+          test -s artifacts/debug/BoileKho.apk
+          echo "BoileKho.apk prepared successfully. File size: $(ls -lh artifacts/debug/BoileKho.apk | awk '{print $5}')"
+
+      - name: Upload BoileKho Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoileKho-debug-APK
+          path: artifacts/debug/BoileKho.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build Release APK & AAB (When Signing Secrets Configured)
+        if: ${{ env.HAS_SECRETS == 'true' }}
+        env:
+          HAS_SECRETS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "Decoding release signing keystore..."
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+          test -s "$RUNNER_TEMP/upload-keystore.jks"
+
+          export KEYSTORE_PATH="$RUNNER_TEMP/upload-keystore.jks"
+          export STORE_PASSWORD="$STORE_PASSWORD"
+          export KEY_PASSWORD="$KEY_PASSWORD"
+
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon
+
+          mkdir -p artifacts/release
+          mkdir -p artifacts/bundle
+
+          cp app/build/outputs/apk/release/app-release.apk artifacts/release/BoileKho.apk
+          test -s artifacts/release/BoileKho.apk
+
+          cp app/build/outputs/bundle/release/app-release.aab artifacts/bundle/BoileKho.aab
+          test -s artifacts/bundle/BoileKho.aab
+
+          echo "Release APK and AAB generated successfully."
+
+      - name: Upload BoileKho Release APK Artifact
+        if: ${{ env.HAS_SECRETS == 'true' }}
+        env:
+          HAS_SECRETS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoileKho-release-APK
+          path: artifacts/release/BoileKho.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload BoileKho Release AAB Artifact
+        if: ${{ env.HAS_SECRETS == 'true' }}
+        env:
+          HAS_SECRETS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: BoileKho-release-AAB
+          path: artifacts/bundle/BoileKho.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Signing Secrets Notice
+        if: ${{ env.HAS_SECRETS != 'true' }}
+        env:
+          HAS_SECRETS: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+        run: |
+          echo "================================================================================="
+          echo "NOTICE: Release signing secrets (KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD)"
+          echo "are not configured in GitHub Secrets. Skipping production release build."
+          echo "The debug APK artifact 'BoileKho-debug-APK' was generated and is ready to install!"
+          echo "See BUILD_GUIDE.md for step-by-step instructions on setting up release secrets."
+          echo "================================================================================="
