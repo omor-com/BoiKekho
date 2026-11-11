@@ -1,0 +1,6 @@
+{
+  "name": "BoiLekho",
+  "description": "Advanced Book Writing, Designing & Publishing Studio (Offline-first, Local-first)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
